@@ -50,8 +50,7 @@ function App() {
           conn.on('open', () => {
             console.log('Connection opened with:', conn.peer);
             setConnectionStatus('connected');
-            // Start sharing screen when connection is established
-            startScreenShare();
+            // Don't automatically start screen share - wait for user to click button
           });
           
           conn.on('close', () => {
@@ -156,6 +155,7 @@ function App() {
         });
       } else {
         console.log('Connection not ready yet, stream will be sent when viewer connects');
+        setError('No viewer connected. Please wait for someone to connect before sharing.');
       }
     } catch (err) {
       console.error('Error getting screen:', err);
@@ -205,7 +205,7 @@ function App() {
       
       conn.on('open', () => {
         console.log('Connection opened to:', remotePeerId);
-        setConnectionStatus('connecting'); // Still connecting until we get the stream
+        setConnectionStatus('connected'); // Changed from 'connecting' to 'connected'
       });
       
       conn.on('close', () => {
@@ -358,14 +358,18 @@ function App() {
               className="w-full h-full object-contain"
             />
             
-            {connectionStatus !== 'connected' && !stream && (
+            {(!stream || connectionStatus !== 'connected') && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center p-4">
                   <Laptop className="h-12 w-12 text-gray-400 mx-auto mb-2" />
                   <p className="text-gray-500">
                     {connectionStatus === 'disconnected' 
                       ? 'Waiting for viewer to connect...' 
-                      : 'Connecting...'}
+                      : connectionStatus === 'connecting'
+                      ? 'Connecting...'
+                      : !stream
+                      ? 'Click "Start Sharing" to begin'
+                      : 'Sharing your screen'}
                   </p>
                 </div>
               </div>
@@ -379,12 +383,20 @@ function App() {
           )}
           
           <div className="flex gap-3">
-            {connectionStatus === 'disconnected' && !stream && (
+            {connectionStatus === 'connected' && !stream && (
               <button
                 onClick={startScreenShare}
                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 Start Sharing
+              </button>
+            )}
+            {stream && (
+              <button
+                onClick={stopScreenShare}
+                className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+              >
+                Stop Sharing
               </button>
             )}
             <button
@@ -393,6 +405,15 @@ function App() {
             >
               Disconnect
             </button>
+          </div>
+          
+          <div className="mt-4 p-3 bg-blue-50 text-blue-700 rounded-lg text-sm">
+            <p className="font-medium mb-1">How to share your screen:</p>
+            <ol className="list-decimal pl-5 space-y-1">
+              <li>Copy your Connection ID and send it to the viewer</li>
+              <li>Wait for the viewer to connect (status will change to "Connected")</li>
+              <li>Click "Start Sharing" to begin sharing your screen</li>
+            </ol>
           </div>
         </div>
       )}
@@ -461,7 +482,7 @@ function App() {
                   <p className="text-gray-500">
                     {connectionStatus === 'disconnected' 
                       ? 'Enter a connection ID to view screen' 
-                      : 'Connecting...'}
+                      : 'Connecting... Waiting for screen share to start'}
                   </p>
                 </div>
               </div>
@@ -481,6 +502,15 @@ function App() {
             >
               Disconnect
             </button>
+          </div>
+          
+          <div className="mt-4 p-3 bg-blue-50 text-blue-700 rounded-lg text-sm">
+            <p className="font-medium mb-1">How to view a screen:</p>
+            <ol className="list-decimal pl-5 space-y-1">
+              <li>Get the Connection ID from the person sharing their screen</li>
+              <li>Enter the ID and click "Connect"</li>
+              <li>Wait for the sharer to start sharing their screen</li>
+            </ol>
           </div>
         </div>
       )}
