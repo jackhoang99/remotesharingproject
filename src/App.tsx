@@ -47,6 +47,17 @@ function App() {
             stopScreenShare();
           });
         });
+
+        // Handle incoming call for the viewing side
+        peer.on('call', (call) => {
+          call.answer(); // Answer the call without sending a stream back
+          
+          call.on('stream', (remoteStream) => {
+            if (videoRef.current) {
+              videoRef.current.srcObject = remoteStream;
+            }
+          });
+        });
       }
       
       peerRef.current = peer;
@@ -67,7 +78,6 @@ function App() {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           cursor: 'always',
-          displaySurface: 'monitor'
         },
         audio: false
       });
@@ -106,6 +116,7 @@ function App() {
     if (!remotePeerId || !peerRef.current) return;
     
     setConnectionStatus('connecting');
+    setError(null);
     
     try {
       const conn = peerRef.current.connect(remotePeerId);
@@ -113,27 +124,30 @@ function App() {
       
       conn.on('open', () => {
         setConnectionStatus('connected');
-        
-        // Set up to receive the video stream
-        peerRef.current?.on('call', (call) => {
-          call.answer(); // Answer the call without sending a stream back
-          
-          call.on('stream', (remoteStream) => {
-            if (videoRef.current) {
-              videoRef.current.srcObject = remoteStream;
-            }
-          });
-        });
       });
       
       conn.on('close', () => {
         setConnectionStatus('disconnected');
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
       });
       
       conn.on('error', (err) => {
         console.error('Connection error:', err);
         setError(`Connection error: ${err}`);
         setConnectionStatus('disconnected');
+      });
+
+      // Set up to receive the video stream
+      peerRef.current.on('call', (call) => {
+        call.answer(); // Answer the call without sending a stream back
+        
+        call.on('stream', (remoteStream) => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = remoteStream;
+          }
+        });
       });
     } catch (err) {
       console.error('Failed to connect:', err);
@@ -144,10 +158,17 @@ function App() {
   
   // Copy peer ID to clipboard
   const copyPeerId = () => {
-    navigator.clipboard.writeText(peerId).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    if (peerId) {
+      navigator.clipboard.writeText(peerId)
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(err => {
+          console.error('Failed to copy:', err);
+          setError('Failed to copy to clipboard');
+        });
+    }
   };
   
   // Disconnect from peer
@@ -158,6 +179,7 @@ function App() {
     stopScreenShare();
     setConnectionStatus('disconnected');
     setMode('landing');
+    setError(null);
   };
   
   return (
@@ -248,7 +270,7 @@ function App() {
             </div>
           )}
           
-          <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden mb-6">
+          <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden mb-6 relative">
             <video
               ref={videoRef}
               autoPlay
@@ -337,7 +359,7 @@ function App() {
             </div>
           )}
           
-          <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden mb-6">
+          <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden mb-6 relative">
             <video
               ref={videoRef}
               autoPlay
