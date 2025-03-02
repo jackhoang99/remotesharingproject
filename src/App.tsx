@@ -11,6 +11,7 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [isWaitingForStream, setIsWaitingForStream] = useState(false);
   
   const peerRef = useRef<Peer | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -75,6 +76,7 @@ function App() {
         peer.on('call', (call) => {
           console.log('Received call from sharer:', call.peer);
           callRef.current = call;
+          setIsWaitingForStream(false);
           
           // Answer the call without sending a stream back
           call.answer();
@@ -186,6 +188,7 @@ function App() {
     console.log('Connecting to peer:', remotePeerId);
     setConnectionStatus('connecting');
     setError(null);
+    setIsWaitingForStream(true);
     
     try {
       // Close any existing connection
@@ -208,6 +211,7 @@ function App() {
       conn.on('close', () => {
         console.log('Connection closed');
         setConnectionStatus('disconnected');
+        setIsWaitingForStream(false);
         if (videoRef.current) {
           videoRef.current.srcObject = null;
         }
@@ -217,11 +221,13 @@ function App() {
         console.error('Connection error:', err);
         setError(`Connection error: ${err}`);
         setConnectionStatus('disconnected');
+        setIsWaitingForStream(false);
       });
     } catch (err) {
       console.error('Failed to connect:', err);
       setError(`Failed to connect: ${err}`);
       setConnectionStatus('disconnected');
+      setIsWaitingForStream(false);
     }
   };
   
@@ -257,6 +263,7 @@ function App() {
     setMode('landing');
     setError(null);
     setRemotePeerId('');
+    setIsWaitingForStream(false);
   };
   
   return (
@@ -472,14 +479,16 @@ function App() {
               className="w-full h-full object-contain"
             />
             
-            {connectionStatus !== 'connected' && (
+            {(connectionStatus !== 'connected' || (connectionStatus === 'connected' && isWaitingForStream && !videoRef.current?.srcObject)) && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center p-4">
                   <Monitor className="h-12 w-12 text-gray-400 mx-auto mb-2" />
                   <p className="text-gray-500">
                     {connectionStatus === 'disconnected' 
                       ? 'Enter a connection ID to view screen' 
-                      : 'Connecting... Waiting for screen share to start'}
+                      : connectionStatus === 'connecting'
+                      ? 'Connecting...'
+                      : 'Connected! Waiting for screen share to start'}
                   </p>
                 </div>
               </div>
