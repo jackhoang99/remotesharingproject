@@ -10,19 +10,28 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
   
   const peerRef = useRef<Peer | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const connectionRef = useRef<any>(null);
+  const callRef = useRef<any>(null);
   
   // Initialize PeerJS
   useEffect(() => {
     if (mode !== 'landing') {
-      const peer = new Peer(uuidv4());
+      // Clean up any existing peer
+      if (peerRef.current) {
+        peerRef.current.destroy();
+      }
+      
+      // Create a new peer with a random ID
+      const peer = new Peer();
       
       peer.on('open', (id) => {
         setPeerId(id);
         console.log('My peer ID is: ' + id);
+        setError(null);
       });
       
       peer.on('error', (err) => {
@@ -34,28 +43,64 @@ function App() {
       // Handle incoming connections (for the sharing side)
       if (mode === 'share') {
         peer.on('connection', (conn) => {
+          console.log('Incoming connection from:', conn.peer);
           connectionRef.current = conn;
           setConnectionStatus('connecting');
           
           conn.on('open', () => {
+            console.log('Connection opened with:', conn.peer);
             setConnectionStatus('connected');
+            // Start sharing screen when connection is established
             startScreenShare();
           });
           
           conn.on('close', () => {
+            console.log('Connection closed');
             setConnectionStatus('disconnected');
             stopScreenShare();
           });
+          
+          conn.on('error', (err) => {
+            console.error('Connection error:', err);
+            setError(`Connection error: ${err}`);
+          });
         });
-
-        // Handle incoming call for the viewing side
+        
+        // Handle incoming calls
         peer.on('call', (call) => {
-          call.answer(); // Answer the call without sending a stream back
+          console.log('Received call from:', call.peer);
+          // Don't answer here, as we're the one sharing
+        });
+      }
+      
+      // For viewing mode
+      if (mode === 'view') {
+        peer.on('call', (call) => {
+          console.log('Received call from sharer:', call.peer);
+          callRef.current = call;
+          
+          // Answer the call without sending a stream back
+          call.answer();
           
           call.on('stream', (remoteStream) => {
+            console.log('Received stream from sharer');
             if (videoRef.current) {
               videoRef.current.srcObject = remoteStream;
+              setConnectionStatus('connected');
             }
+          });
+          
+          call.on('close', () => {
+            console.log('Call closed');
+            if (videoRef.current) {
+              videoRef.current.srcObject = null;
+            }
+            setConnectionStatus('disconnected');
+          });
+          
+          call.on('error', (err) => {
+            console.error('Call error:', err);
+            setError(`Call error: ${err}`);
           });
         });
       }
@@ -66,8 +111,11 @@ function App() {
         if (connectionRef.current) {
           connectionRef.current.close();
         }
-        peer.destroy();
+        if (callRef.current) {
+          callRef.current.close();
+        }
         stopScreenShare();
+        peer.destroy();
       };
     }
   }, [mode]);
@@ -75,26 +123,39 @@ function App() {
   // Start screen sharing
   const startScreenShare = async () => {
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: 'always',
-        },
+      // Stop any existing stream
+      stopScreenShare();
+      
+      console.log('Starting screen share...');
+      const mediaStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
         audio: false
       });
       
+      setStream(mediaStream);
+      
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        videoRef.current.srcObject = mediaStream;
       }
       
       // When sharing stops from browser controls
-      stream.getVideoTracks()[0].onended = () => {
+      mediaStream.getVideoTracks()[0].onended = () => {
+        console.log('Screen sharing ended by user');
         stopScreenShare();
       };
       
-      // Send stream to viewer
-      if (connectionRef.current && connectionRef.current.open) {
-        const call = peerRef.current?.call(connectionRef.current.peer, stream);
-        console.log('Sending stream to viewer', call);
+      // Send stream to viewer if connected
+      if (connectionRef.current && connectionRef.current.open && peerRef.current) {
+        console.log('Calling viewer:', connectionRef.current.peer);
+        const call = peerRef.current.call(connectionRef.current.peer, mediaStream);
+        callRef.current = call;
+        
+        call.on('error', (err) => {
+          console.error('Call error:', err);
+          setError(`Call error: ${err}`);
+        });
+      } else {
+        console.log('Connection not ready yet, stream will be sent when viewer connects');
       }
     } catch (err) {
       console.error('Error getting screen:', err);
@@ -104,10 +165,20 @@ function App() {
   
   // Stop screen sharing
   const stopScreenShare = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+    
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach(track => track.stop());
       videoRef.current.srcObject = null;
+    }
+    
+    if (callRef.current) {
+      callRef.current.close();
+      callRef.current = null;
     }
   };
   
@@ -115,18 +186,30 @@ function App() {
   const connectToPeer = () => {
     if (!remotePeerId || !peerRef.current) return;
     
+    console.log('Connecting to peer:', remotePeerId);
     setConnectionStatus('connecting');
     setError(null);
     
     try {
-      const conn = peerRef.current.connect(remotePeerId);
+      // Close any existing connection
+      if (connectionRef.current) {
+        connectionRef.current.close();
+      }
+      
+      // Create a new connection
+      const conn = peerRef.current.connect(remotePeerId, {
+        reliable: true
+      });
+      
       connectionRef.current = conn;
       
       conn.on('open', () => {
-        setConnectionStatus('connected');
+        console.log('Connection opened to:', remotePeerId);
+        setConnectionStatus('connecting'); // Still connecting until we get the stream
       });
       
       conn.on('close', () => {
+        console.log('Connection closed');
         setConnectionStatus('disconnected');
         if (videoRef.current) {
           videoRef.current.srcObject = null;
@@ -137,17 +220,6 @@ function App() {
         console.error('Connection error:', err);
         setError(`Connection error: ${err}`);
         setConnectionStatus('disconnected');
-      });
-
-      // Set up to receive the video stream
-      peerRef.current.on('call', (call) => {
-        call.answer(); // Answer the call without sending a stream back
-        
-        call.on('stream', (remoteStream) => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = remoteStream;
-          }
-        });
       });
     } catch (err) {
       console.error('Failed to connect:', err);
@@ -175,11 +247,19 @@ function App() {
   const disconnect = () => {
     if (connectionRef.current) {
       connectionRef.current.close();
+      connectionRef.current = null;
     }
+    
+    if (callRef.current) {
+      callRef.current.close();
+      callRef.current = null;
+    }
+    
     stopScreenShare();
     setConnectionStatus('disconnected');
     setMode('landing');
     setError(null);
+    setRemotePeerId('');
   };
   
   return (
@@ -278,7 +358,7 @@ function App() {
               className="w-full h-full object-contain"
             />
             
-            {connectionStatus !== 'connected' && (
+            {connectionStatus !== 'connected' && !stream && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center p-4">
                   <Laptop className="h-12 w-12 text-gray-400 mx-auto mb-2" />
@@ -299,6 +379,14 @@ function App() {
           )}
           
           <div className="flex gap-3">
+            {connectionStatus === 'disconnected' && !stream && (
+              <button
+                onClick={startScreenShare}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+              >
+                Start Sharing
+              </button>
+            )}
             <button
               onClick={disconnect}
               className="flex-1 bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
