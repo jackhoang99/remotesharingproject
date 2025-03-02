@@ -45,12 +45,10 @@ function App() {
         peer.on('connection', (conn) => {
           console.log('Incoming connection from:', conn.peer);
           connectionRef.current = conn;
-          setConnectionStatus('connecting');
           
           conn.on('open', () => {
             console.log('Connection opened with:', conn.peer);
-            setConnectionStatus('connected');
-            // Don't automatically start screen share - wait for user to click button
+            setConnectionStatus('connected'); // Set to connected immediately when connection opens
           });
           
           conn.on('close', () => {
@@ -85,7 +83,6 @@ function App() {
             console.log('Received stream from sharer');
             if (videoRef.current) {
               videoRef.current.srcObject = remoteStream;
-              setConnectionStatus('connected');
             }
           });
           
@@ -205,7 +202,7 @@ function App() {
       
       conn.on('open', () => {
         console.log('Connection opened to:', remotePeerId);
-        setConnectionStatus('connected'); // Changed from 'connecting' to 'connected'
+        setConnectionStatus('connected'); // Set to connected immediately when connection opens
       });
       
       conn.on('close', () => {
